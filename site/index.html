@@ -263,7 +263,7 @@
     </script>
     <div class="badges">
       <span class="badge green">Apache 2.0</span>
-      <span class="badge green">469 tests passing</span>
+      <span class="badge green">518 tests passing</span>
       <span class="badge green">AGM 49 / 49 at 100%</span>
       <span class="badge green">BusinessMemBench 1.000</span>
       <span class="badge green">+28.9 pts vs Graphiti</span>
@@ -392,7 +392,7 @@ docker compose up -d
 python -m venv .venv &amp;&amp; source .venv/bin/activate
 pip install -e .
 
-# 3. Verify the test suite (469 tests, ~12s)
+# 3. Verify the test suite (518 tests, ~12s)
 PYTHONPATH=. pytest tests/ -v
 
 # 4. Reproduce AGM compliance (49/49 at 100%, ~30s)
