@@ -9,7 +9,7 @@
 
 [![Atlas in 90 seconds — a fact changes, Ripple re-evaluates every belief that depended on it](site/atlas-hero.gif)](https://livememory.pages.dev)
 
-*↑ 3× preview — [watch the narrated 90-second version with sound](https://livememory.pages.dev).*
+*↑ 3× preview — [watch the narrated 90-second version with sound](https://livememory.pages.dev). The story behind it is [on X](https://x.com/richschefren/status/2065318023007814017) — reply with the stale belief that bit you.*
 
 > **Alpha:** the propagation loop works end-to-end (`./demo.sh` proves it in 12 seconds). Ingestion and entity resolution on truly unstructured text are still maturing — see `atlas_core/ingestion/` for the prompts we're iterating on.
 
