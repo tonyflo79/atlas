@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 from graphiti_core import Graphiti
 
+from atlas_core.ripple.episode_adapter import episode_edges_to_changes
+
 if TYPE_CHECKING:
     from graphiti_core.graphiti import AddEpisodeResults
 
@@ -97,15 +99,33 @@ class AtlasGraphiti(Graphiti):
             ]
 
             if promoted_edges:
+                # Translate the episode's edge set into per-kref confidence
+                # changes the engine actually accepts, then cascade one belief
+                # at a time. (RippleEngine.propagate is per-upstream-change; it
+                # never had the new_edges/invalidated_edges/episode signature
+                # this hook was originally written against.)
+                changes = episode_edges_to_changes(
+                    promoted_edges, invalidated_edges
+                )
                 log.debug(
-                    "Triggering Ripple on %d promoted edges (%d invalidated)",
+                    "Triggering Ripple on %d promoted edges (%d invalidated) "
+                    "-> %d belief change(s)",
                     len(promoted_edges),
                     len(invalidated_edges),
+                    len(changes),
                 )
-                await self.ripple_engine.propagate(
-                    new_edges=promoted_edges,
-                    invalidated_edges=invalidated_edges,
-                    episode=results.episode,
-                )
+                for change in changes:
+                    cascade = await self.ripple_engine.propagate(
+                        change.upstream_kref,
+                        old_confidence=change.old_confidence,
+                        new_confidence=change.new_confidence,
+                        belief_text=change.belief_text,
+                    )
+                    if not cascade.succeeded:
+                        log.warning(
+                            "Ripple cascade error for %s: %s",
+                            change.upstream_kref,
+                            cascade.error,
+                        )
 
         return results

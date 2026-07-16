@@ -37,6 +37,10 @@ from atlas_core.ripple.contradiction import (
     detect_contradictions,
 )
 from atlas_core.ripple.engine import RippleEngine
+from atlas_core.ripple.episode_adapter import (
+    BeliefConfidenceChange,
+    episode_edges_to_changes,
+)
 from atlas_core.ripple.reassess import (
     DEFAULT_WEIGHTS,
     HALF_LIFE_DAYS,
@@ -53,6 +57,9 @@ from atlas_core.ripple.reassess import (
 __all__ = [
     # Engine
     "RippleEngine",
+    # Episode -> cascade adapter
+    "BeliefConfidenceChange",
+    "episode_edges_to_changes",
     # AnalyzeImpact
     "ImpactNode",
     "AnalyzeImpactResult",
