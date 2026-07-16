@@ -4,6 +4,7 @@ Guards audit finding A5 — the launchd HTTP service must fail closed with a
 per-install token even when nothing is configured. No Neo4j / network needed.
 """
 
+import os
 import stat
 
 import pytest
@@ -41,6 +42,7 @@ def test_mints_and_persists_token(tmp_path):
     assert token_file.read_text(encoding="utf-8").strip() == token
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits are not honored on Windows")
 def test_token_file_is_owner_only(tmp_path):
     load_or_create_api_token(tmp_path)
     mode = stat.S_IMODE((tmp_path / "api_token").stat().st_mode)
