@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -74,8 +75,17 @@ FORGET_SCHEMA = {
 
 
 def _safe_profile(value: str) -> str:
-    normalized = re.sub(r"[^a-zA-Z0-9_.-]+", "-", value.strip()).strip("-.")
-    return normalized or "default"
+    """Return a readable filesystem name with a collision-resistant suffix."""
+    raw = value.strip() or "default"
+    normalized = re.sub(r"[^a-zA-Z0-9_.-]+", "-", raw).strip("-.") or "default"
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    return f"{normalized[:64]}-{digest}"
+
+
+def _scope_id(*parts: str) -> str:
+    """Preserve exact host identity boundaries without exposing them in rows."""
+    canonical = json.dumps(list(parts), ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _as_bool(value: Any, default: bool = True) -> bool:
@@ -189,8 +199,10 @@ class AtlasMemoryProvider(MemoryProvider):
         if not identity:
             identity = self._hermes_home.name if self._hermes_home.parent.name == "profiles" else "default"
         self._profile_name = _safe_profile(identity)
-        user_id = _safe_profile(str(kwargs.get("user_id") or "default"))
-        self._profile_id = f"{self._profile_name}:{user_id}"
+        platform = str(kwargs.get("platform") or "cli")
+        user_id = str(kwargs.get("user_id") or "default")
+        user_id_alt = str(kwargs.get("user_id_alt") or "")
+        self._profile_id = _scope_id(identity, platform, user_id, user_id_alt)
         self._session_id = session_id
 
         configured_dir = os.environ.get("ATLAS_HERMES_DATA_DIR") or config.get("data_dir") or ""
@@ -428,6 +440,11 @@ class AtlasMemoryProvider(MemoryProvider):
         if self._writer and self._writer.is_alive():
             self._write_queue.put(_STOP)
             self._writer.join(timeout=5.0)
+            if self._writer.is_alive():
+                raise RuntimeError(
+                    "Atlas could not drain queued memory writes within 5 seconds; "
+                    "the writer remains active and shutdown is incomplete"
+                )
         self._writer = None
 
 

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -59,8 +60,7 @@ def _load_real_hermes_provider(monkeypatch: pytest.MonkeyPatch, hermes_root: Pat
 
     importlib.reload(hermes_constants)
     memory_plugins = importlib.import_module("plugins.memory")
-    destination = home / "plugins" / "atlas"
-    provider = memory_plugins._load_provider_from_dir(destination)
+    provider = memory_plugins.load_memory_provider("atlas")
     assert provider is not None
     return provider
 
@@ -266,3 +266,102 @@ def test_windows_installer_is_portable() -> None:
     assert "$env:HERMES_HOME" in script
     assert "plugins\\atlas" in script
     assert "hermes memory setup atlas" in script
+
+
+def test_lossy_display_names_cannot_cross_profile_platform_or_user_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hermes_root: Path,
+) -> None:
+    shared_data = tmp_path / "shared-atlas"
+    monkeypatch.setenv("ATLAS_HERMES_DATA_DIR", str(shared_data))
+    home_a = tmp_path / "profile-a"
+    home_b = tmp_path / "profile-b"
+    _install_fixture(home_a)
+    _install_fixture(home_b)
+
+    first = _load_real_hermes_provider(monkeypatch, hermes_root, home_a)
+    first.initialize(
+        "one",
+        hermes_home=str(home_a),
+        agent_identity="team/a",
+        platform="telegram",
+        user_id="user/a",
+        user_id_alt="stable/a",
+    )
+    first.sync_turn("Top secret indigo scope", "Stored")
+    first.shutdown()
+
+    second = _load_real_hermes_provider(monkeypatch, hermes_root, home_b)
+    second.initialize(
+        "two",
+        hermes_home=str(home_b),
+        agent_identity="team a",
+        platform="discord",
+        user_id="user a",
+        user_id_alt="stable a",
+    )
+    assert _tool(second, "atlas_memory_search", {"query": "indigo"})["count"] == 0
+    assert first._profile_name != second._profile_name
+    assert first._profile_id != second._profile_id
+    second.shutdown()
+
+
+def test_search_does_not_hide_relevant_memory_older_than_200_rows(tmp_path: Path) -> None:
+    import importlib.util
+
+    store_path = PACKAGE_ROOT / "atlas" / "store.py"
+    spec = importlib.util.spec_from_file_location("atlas_native_store_regression", store_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    store = module.AtlasSQLiteStore(tmp_path / "search.sqlite3")
+    oldest_id = store.add(
+        profile_id="profile",
+        session_id="old",
+        kind="turn",
+        content="The unique zephyr protocol is authoritative.",
+    )
+    for index in range(205):
+        store.add(
+            profile_id="profile",
+            session_id="new",
+            kind="turn",
+            content=f"Unrelated recent record {index}",
+        )
+    hits = store.search("zephyr", profile_id="profile", limit=5)
+    assert [hit["memory_id"] for hit in hits] == [oldest_id]
+
+
+def test_shutdown_reports_undrained_writer_and_retains_handle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    hermes_root: Path,
+) -> None:
+    home = tmp_path / ".hermes"
+    _install_fixture(home)
+    provider = _load_real_hermes_provider(monkeypatch, hermes_root, home)
+    provider.initialize("blocked", hermes_home=str(home), agent_identity="default")
+    gate = threading.Event()
+    original_add = provider._store.add
+
+    def blocked_add(**kwargs):
+        gate.wait(timeout=10)
+        return original_add(**kwargs)
+
+    provider._store.add = blocked_add
+    provider.sync_turn("Final queued obsidian fact", "Stored")
+    deadline = time.monotonic() + 1
+    while provider._write_queue.qsize() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    with pytest.raises(RuntimeError, match="shutdown is incomplete"):
+        provider.shutdown()
+    assert provider._writer is not None and provider._writer.is_alive()
+    gate.set()
+    provider._writer.join(timeout=2)
+    provider.shutdown()
+
+    restarted = _load_real_hermes_provider(monkeypatch, hermes_root, home)
+    restarted.initialize("restart", hermes_home=str(home), agent_identity="default")
+    assert _tool(restarted, "atlas_memory_search", {"query": "obsidian"})["count"] == 1
+    restarted.shutdown()

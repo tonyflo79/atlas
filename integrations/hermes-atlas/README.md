@@ -57,10 +57,15 @@ Start Hermes, complete a turn containing a distinctive fact, exit cleanly, resta
 The default database is inside the active profile home:
 
 ```text
-$HERMES_HOME/atlas/data/atlas-<profile>.sqlite3
+$HERMES_HOME/atlas/data/atlas-<profile>-<identity-hash>.sqlite3
 ```
 
-Rows are also scoped by `<profile>:<platform-user>` and record the exact Hermes session ID. Search and list span sessions by default for long-term recall; pass `session_id` to filter exactly. Different Hermes profiles never share a default database.
+Rows are scoped by a SHA-256 digest of the exact profile identity, platform,
+primary user ID, and alternate stable user ID, and record the exact Hermes
+session ID. The readable filename includes a collision-resistant identity
+suffix, so distinct host identifiers cannot collapse onto one scope. Search
+and list span sessions by default for long-term recall; pass `session_id` to
+filter exactly. Different Hermes profiles never share a default database.
 
 Because default state lives under `$HERMES_HOME`, normal `hermes backup` already captures it and `backup_paths()` correctly returns an empty list. If `data_dir` or `ATLAS_HERMES_DATA_DIR` points outside the Hermes home, Atlas reports that directory through `backup_paths()` for Hermes's external-path backup flow.
 

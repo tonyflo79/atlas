@@ -209,7 +209,13 @@ class AtlasSQLiteStore:
         )
         if not terms or limit < 1:
             return []
-        rows = self.list(profile_id=profile_id, session_id=session_id, limit=200)
+        sql = "SELECT * FROM atlas_memories WHERE profile_id = ? AND status = 'active'"
+        params: list[Any] = [profile_id]
+        if session_id:
+            sql += " AND session_id = ?"
+            params.append(session_id)
+        with self._connection() as conn:
+            rows = [self._public(row) for row in conn.execute(sql, params).fetchall()]
         phrase = " ".join(terms)
         ranked: list[tuple[float, str, dict[str, Any]]] = []
         for row in rows:
