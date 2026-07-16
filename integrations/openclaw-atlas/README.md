@@ -78,7 +78,7 @@ Leave that permission absent when `autoCapture` is false; Atlas does not registe
 - **Profile:** OpenClaw places its shared SQLite database under the active profile's state directory. Different `--profile` or `OPENCLAW_STATE_DIR` values therefore use different databases.
 - **Agent:** every record carries the host-provided agent id; tools and hooks retrieve only the current agent's records.
 - **Session:** set `scope: "session"` to additionally bind every record to the current session key/id. The default `agent` scope supports long-term recall across conversations for one agent.
-- **Restart:** state is committed by OpenClaw's SQLite plugin-state owner and survives plugin/gateway process restart.
+- **Restart:** Atlas commits directly to its profile-local SQLite database and survives plugin/gateway process restart.
 
 The store rejects new entries at 10,000 records rather than silently evicting durable memory.
 

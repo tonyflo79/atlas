@@ -207,3 +207,17 @@ test("SQLite survives restart and different profile state directories are isolat
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("profile fallback cannot escape the configured OpenClaw home", () => {
+  const base = mkdtempSync(join(tmpdir(), "atlas-openclaw-home-"));
+  try {
+    const path = resolveAtlasDatabasePath({
+      OPENCLAW_HOME: base,
+      OPENCLAW_PROFILE: "../../shared profile",
+    });
+    assert.equal(path.startsWith(`${base}/.openclaw-`), true);
+    assert.equal(path.includes("../"), false);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});

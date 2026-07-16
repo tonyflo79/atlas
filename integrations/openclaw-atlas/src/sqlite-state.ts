@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -16,6 +17,15 @@ function expandHome(value: string): string {
     : value;
 }
 
+function safeProfileDirectory(profile: string): string {
+  if (/^[A-Za-z0-9_.-]+$/.test(profile) && profile !== "." && profile !== "..") {
+    return profile;
+  }
+  const readable = profile.replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "") || "profile";
+  const digest = createHash("sha256").update(profile).digest("hex").slice(0, 12);
+  return `${readable.slice(0, 64)}-${digest}`;
+}
+
 export function resolveAtlasDatabasePath(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
@@ -31,7 +41,7 @@ export function resolveAtlasDatabasePath(
     const profile = env.OPENCLAW_PROFILE?.trim();
     stateDir =
       profile && profile.toLowerCase() !== "default"
-        ? join(baseHome, `.openclaw-${profile}`)
+        ? join(baseHome, `.openclaw-${safeProfileDirectory(profile)}`)
         : join(baseHome, ".openclaw");
   }
   return join(stateDir, "plugins", "atlas-memory", "atlas.sqlite");

@@ -288,15 +288,21 @@ const atlasMemoryPlugin: OpenClawPluginDefinition = definePluginEntry({
         }
         const scope = scopeFor(ctx, config);
         let captured = 0;
-        for (const rawText of extractUserTexts(event.messages)) {
+        for (const rawText of extractUserTexts(event.messages).slice(-2)) {
           if (
             captured >= 2 ||
             !shouldAutoCapture(rawText, config.captureMaxChars)
           ) {
             continue;
           }
-          await store.put({ text: rawText, scope, source: "auto_capture" });
-          captured += 1;
+          const result = await store.put({
+            text: rawText,
+            scope,
+            source: "auto_capture",
+          });
+          if (result.action === "created") {
+            captured += 1;
+          }
         }
         if (captured > 0) {
           api.logger.info?.(
