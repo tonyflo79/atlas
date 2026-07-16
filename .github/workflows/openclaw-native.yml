@@ -39,9 +39,7 @@ jobs:
         working-directory: .contract/openclaw
         run: |
           pnpm install --frozen-lockfile --reporter=append-only
-          pnpm build:plugin-sdk:dts
-          OPENCLAW_PLUGIN_SDK_CANONICAL_DTS=1 node --import tsx scripts/write-plugin-sdk-entry-dts.ts
-          node scripts/check-plugin-sdk-exports.mjs
+          pnpm build:plugin-sdk:strict-smoke
           pnpm build
 
       - name: Install package-only development dependencies
