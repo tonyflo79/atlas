@@ -18,12 +18,19 @@ def _build_app():
     from neo4j import AsyncGraphDatabase
 
     from atlas_core.api import AtlasMCPServer, create_http_app
+    from atlas_core.api.http_server import load_or_create_api_token
     from atlas_core.trust import HashChainedLedger, QuarantineStore
 
     data_dir = Path(os.environ.get(
         "ATLAS_DATA_DIR", str(Path.home() / ".atlas"),
     ))
     data_dir.mkdir(parents=True, exist_ok=True)
+
+    # Fail-closed: the always-on launchd service authenticates every /tools and
+    # /verify-chain call with a per-install bearer token. Trusted local clients
+    # read it from ATLAS_API_TOKEN or <data_dir>/api_token; a cross-origin page
+    # cannot obtain it, closing the unauthenticated mutation/exfiltration surface.
+    auth_token = load_or_create_api_token(data_dir)
 
     driver = AsyncGraphDatabase.driver(
         os.environ.get("NEO4J_URI", "bolt://localhost:7687"),
@@ -37,7 +44,7 @@ def _build_app():
     server = AtlasMCPServer(
         driver=driver, quarantine=quarantine, ledger=ledger,
     )
-    return create_http_app(mcp_server=server)
+    return create_http_app(mcp_server=server, auth_token=auth_token)
 
 
 app = _build_app()
