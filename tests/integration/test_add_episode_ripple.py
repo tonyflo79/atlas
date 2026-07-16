@@ -162,7 +162,7 @@ class TestAddEpisodeCascade:
                 "  a.confidence_score = 0.2 "
                 "MERGE (b:AtlasItem {kref: $b}) SET b.deprecated = false, "
                 "  b.confidence_score = 0.85, b.last_evidence_days = 0 "
-                "MERGE (b)-[:DEPENDS_ON {strength: 0.8}]->(a)",
+                "MERGE (b)-[:DEPENDS_ON {dependency_strength: 0.8}]->(a)",
                 a=upstream, b=downstream,
             )
 
