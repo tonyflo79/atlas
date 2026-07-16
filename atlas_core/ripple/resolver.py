@@ -156,6 +156,49 @@ def find_pending_entry(
     return None
 
 
+# ─── Live-node projection ────────────────────────────────────────────────────
+
+
+async def _project_resolution_onto_live_node(
+    driver: AsyncDriver,
+    *,
+    target_kref: Kref,
+    confidence: float,
+    clear_core: bool,
+) -> int:
+    """Write the resolved decision onto the live belief node Ripple reads.
+
+    `revise()` records the immutable AtlasRevision lineage (keyed by a fresh
+    `root_kref` + revision hash, confidence buried in `content_json`). Ripple's
+    reassess / routing / contradiction queries instead traverse the live belief
+    node keyed by the property `kref`, reading `confidence_score` /
+    `is_core_conviction`. Without projecting the resolved value back onto that
+    node, an accepted human decision never reaches the state future cascades
+    read. This closes that loop for the node addressed by the proposal.
+
+    Matches (does not create) the live node: if no belief node exists for
+    `target_kref` there is nothing to reassess, so this is a safe no-op.
+
+    Returns the number of live nodes updated.
+    """
+    cypher = """
+    MATCH (n {kref: $kref})
+    SET n.confidence_score = $confidence
+    FOREACH (_ IN CASE WHEN $clear_core THEN [1] ELSE [] END |
+      SET n.is_core_conviction = false)
+    RETURN count(n) AS updated
+    """
+    async with driver.session() as session:
+        result = await session.run(
+            cypher,
+            kref=target_kref.to_string(),
+            confidence=confidence,
+            clear_core=clear_core,
+        )
+        record = await result.single()
+    return int(record["updated"]) if record else 0
+
+
 # ─── Resolver ───────────────────────────────────────────────────────────────
 
 
@@ -258,6 +301,21 @@ async def resolve_adjudication(
             revision_outcome.superseded_kref.to_string()
             if revision_outcome.superseded_kref else None
         )
+
+        # Close the Ripple loop: revise() only records the AtlasRevision
+        # lineage; project the resolved values onto the live belief node
+        # ({kref}) that reassess/routing/contradiction actually traverse, so
+        # the accepted decision reaches future cascades.
+        projected = await _project_resolution_onto_live_node(
+            driver,
+            target_kref=target_kref,
+            confidence=chosen_conf,
+            clear_core=(decision == "demote_core"),
+        )
+        if projected == 0:
+            outcome.notes.append(
+                "no live belief node keyed by target_kref; projection skipped"
+            )
 
     # Audit event — every resolve writes to the ledger, even rejects.
     # Accept/adjust/demote_core actually superseded a revision; reject is

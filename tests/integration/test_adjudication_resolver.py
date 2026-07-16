@@ -111,6 +111,153 @@ contradictions_count: 0
 # ─── Resolver round-trip ────────────────────────────────────────────────────
 
 
+async def _seed_live_belief(
+    driver,
+    *,
+    kref: str,
+    confidence: float,
+    is_core: bool = False,
+) -> None:
+    """Create the live belief node Ripple reads, mirroring the materializer:
+    a node keyed by the `kref` property carrying confidence_score /
+    is_core_conviction.
+    """
+    cypher = """
+    MERGE (b:AtlasItem:Belief {kref: $kref})
+      ON CREATE SET b.deprecated = false
+    SET b.confidence_score = $confidence,
+        b.is_core_conviction = $is_core,
+        b.text = 'seeded belief'
+    """
+    async with driver.session() as session:
+        await session.run(cypher, kref=kref, confidence=confidence, is_core=is_core)
+
+
+async def _read_live_belief(driver, *, kref: str):
+    cypher = """
+    MATCH (n {kref: $kref})
+    RETURN n.confidence_score AS confidence_score,
+           coalesce(n.is_core_conviction, false) AS is_core_conviction
+    """
+    async with driver.session() as session:
+        result = await session.run(cypher, kref=kref)
+        return await result.single()
+
+
+class TestResolveProjectsToLiveNode:
+    """A4: the resolved decision must land on the live belief node Ripple
+    traverses ({kref}, confidence_score / is_core_conviction), not only on the
+    AtlasRevision lineage — otherwise accepted decisions never reach future
+    cascades.
+    """
+
+    async def test_accept_projects_confidence_onto_live_node(
+        self, driver, ledger, tmp_dir, ns,
+    ):
+        from atlas_core.ripple.resolver import resolve_adjudication
+
+        target_kref = f"kref://{ns}/Beliefs/pricing_floor.belief"
+        await _seed_live_belief(driver, kref=target_kref, confidence=0.85)
+
+        adj_dir = tmp_dir / "adjudication"
+        _write_adjudication_file(
+            directory=adj_dir,
+            proposal_id="adj_proj_accept",
+            target_kref=target_kref,
+            current=0.85,
+            proposed=0.40,
+        )
+
+        outcome = await resolve_adjudication(
+            "adj_proj_accept", "accept",
+            driver=driver, ledger=ledger, directory=adj_dir,
+        )
+        assert outcome.applied is True
+
+        live = await _read_live_belief(driver, kref=target_kref)
+        assert live is not None
+        # The node future cascades read now carries the accepted value.
+        assert live["confidence_score"] == 0.40
+
+    async def test_adjust_projects_adjusted_confidence_onto_live_node(
+        self, driver, ledger, tmp_dir, ns,
+    ):
+        from atlas_core.ripple.resolver import resolve_adjudication
+
+        target_kref = f"kref://{ns}/Beliefs/adjusted.belief"
+        await _seed_live_belief(driver, kref=target_kref, confidence=0.80)
+
+        adj_dir = tmp_dir / "adjudication"
+        _write_adjudication_file(
+            directory=adj_dir,
+            proposal_id="adj_proj_adjust",
+            target_kref=target_kref,
+            current=0.80, proposed=0.30,
+        )
+
+        await resolve_adjudication(
+            "adj_proj_adjust", "adjust",
+            driver=driver, ledger=ledger,
+            adjusted_confidence=0.55, directory=adj_dir,
+        )
+
+        live = await _read_live_belief(driver, kref=target_kref)
+        assert live["confidence_score"] == 0.55  # not 0.30 (proposed)
+
+    async def test_demote_core_clears_flag_on_live_node(
+        self, driver, ledger, tmp_dir, ns,
+    ):
+        from atlas_core.ripple.resolver import resolve_adjudication
+
+        target_kref = f"kref://{ns}/Beliefs/sacred_live.belief"
+        await _seed_live_belief(
+            driver, kref=target_kref, confidence=0.95, is_core=True,
+        )
+
+        adj_dir = tmp_dir / "adjudication"
+        _write_adjudication_file(
+            directory=adj_dir,
+            proposal_id="adj_proj_demote",
+            target_kref=target_kref,
+            current=0.95, proposed=0.30,
+            route="core_protected",
+        )
+
+        await resolve_adjudication(
+            "adj_proj_demote", "demote_core",
+            driver=driver, ledger=ledger, directory=adj_dir,
+        )
+
+        live = await _read_live_belief(driver, kref=target_kref)
+        assert live["is_core_conviction"] is False
+        assert live["confidence_score"] == 0.30
+
+    async def test_reject_leaves_live_node_untouched(
+        self, driver, ledger, tmp_dir, ns,
+    ):
+        from atlas_core.ripple.resolver import resolve_adjudication
+
+        target_kref = f"kref://{ns}/Beliefs/keep_live.belief"
+        await _seed_live_belief(driver, kref=target_kref, confidence=0.90)
+
+        adj_dir = tmp_dir / "adjudication"
+        _write_adjudication_file(
+            directory=adj_dir,
+            proposal_id="adj_proj_reject",
+            target_kref=target_kref,
+            current=0.90, proposed=0.10,
+        )
+
+        outcome = await resolve_adjudication(
+            "adj_proj_reject", "reject",
+            driver=driver, ledger=ledger, directory=adj_dir,
+        )
+        assert outcome.applied is False
+
+        live = await _read_live_belief(driver, kref=target_kref)
+        assert live["confidence_score"] == 0.90  # unchanged
+
+
 class TestResolveRoundtrip:
     async def test_accept_creates_revision_and_ledger_event(
         self, driver, ledger, tmp_dir, ns,
