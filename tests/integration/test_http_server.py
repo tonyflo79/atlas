@@ -65,6 +65,31 @@ async def client(http_app):
         yield c
 
 
+SECRET_TOKEN = "s3cret-per-install-token"
+
+
+@pytest.fixture
+def secured_app(driver, tmp_dir):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")
+    from atlas_core.api import AtlasMCPServer, create_http_app
+    from atlas_core.trust import HashChainedLedger, QuarantineStore
+
+    quarantine = QuarantineStore(tmp_dir / "candidates.db")
+    ledger = HashChainedLedger(tmp_dir / "ledger.db")
+    server = AtlasMCPServer(driver=driver, quarantine=quarantine, ledger=ledger)
+    return create_http_app(mcp_server=server, auth_token=SECRET_TOKEN)
+
+
+@pytest.fixture
+async def secured_client(secured_app):
+    from httpx import ASGITransport, AsyncClient
+
+    transport = ASGITransport(app=secured_app)
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
 class TestHTTPHealth:
     async def test_health_endpoint(self, client):
         response = await client.get("/health")
@@ -111,6 +136,59 @@ class TestHTTPVerifyChain:
         body = response.json()
         assert body["intact"] is True
         assert body["last_verified_sequence"] == 0
+
+
+class TestHTTPAuth:
+    """When an auth token is configured, the privileged surface (/tools and
+    /verify-chain) rejects requests without a valid bearer token, while the
+    liveness/stream endpoints stay open. Guards against audit finding A5 —
+    unauthenticated mutation + memory-exfiltration over wildcard CORS."""
+
+    AUTH = {"Authorization": f"Bearer {SECRET_TOKEN}"}
+
+    async def test_list_tools_requires_token(self, secured_client):
+        assert (await secured_client.get("/tools")).status_code == 401
+
+    async def test_list_tools_rejects_wrong_token(self, secured_client):
+        resp = await secured_client.get(
+            "/tools", headers={"Authorization": "Bearer wrong"},
+        )
+        assert resp.status_code == 401
+        assert resp.headers.get("www-authenticate") == "Bearer"
+
+    async def test_list_tools_accepts_valid_token(self, secured_client):
+        resp = await secured_client.get("/tools", headers=self.AUTH)
+        assert resp.status_code == 200
+        assert len(resp.json()["tools"]) == 17
+
+    async def test_dispatch_requires_token(self, secured_client):
+        resp = await secured_client.post(
+            "/tools/quarantine.list_pending", json={"params": {"limit": 10}},
+        )
+        assert resp.status_code == 401
+
+    async def test_dispatch_accepts_valid_token(self, secured_client):
+        resp = await secured_client.post(
+            "/tools/quarantine.list_pending",
+            json={"params": {"limit": 10}},
+            headers=self.AUTH,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+    async def test_verify_chain_requires_token(self, secured_client):
+        assert (await secured_client.get("/verify-chain")).status_code == 401
+
+    async def test_verify_chain_accepts_valid_token(self, secured_client):
+        resp = await secured_client.get("/verify-chain", headers=self.AUTH)
+        assert resp.status_code == 200
+        assert resp.json()["intact"] is True
+
+    async def test_health_stays_open(self, secured_client):
+        assert (await secured_client.get("/health")).status_code == 200
+
+    async def test_events_stats_stays_open(self, secured_client):
+        assert (await secured_client.get("/events/stats")).status_code == 200
 
 
 class TestGRPCScaffold:
